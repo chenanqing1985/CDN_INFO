@@ -1,0 +1,19 @@
+在测试NGINX纯回源模型时，通过strace发现进程在readv之后，都跟随一个readv的EAGAIN，比例接近于1:1，因为加入
+EPOLL的边缘触发模型的fd都是非阻塞的，默认情况下会要求读到EAGAIN才会readv退出。
+
+从readv的内核实现来看：
+SYSCALL_DEFINE3(readv  --->vfs_readv--->do_readv_writev
+针对socket的file_operations的实现，回源模式使用的tcp对应的函数是：sock_aio_read-->do_sock_read-->tcp_recvmsg
+，当发现没有内容拷贝的时候，会返回Eagain。
+
+对于NGINX的调用来说：
+ngx_readv_chain函数提供了一个开关来避免这个问题，即非贪婪模式，也就是：
+     if (n < size && !(ngx_event_flags & NGX_USE_GREEDY_EVENT)) {
+                rev->ready = 0;
+            }
+            
+当开启非贪婪模式之后，并且拷贝的内容少于给raedv传入的iovec的总空间大小的话，就会不再进行拷贝，
+因为既然第一次拷贝没满，那么只存在拷贝了部分内容同时又被信号中断的情况，这种概率还是比较低的，所以干脆等到
+下一次epoll再拷贝。减少了无效的系统调用开销。
+
+tcp_rcv_space_adjust函数就是在拷贝到数据的时候才调用的，会更新窗口。
