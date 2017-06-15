@@ -96,7 +96,8 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		/* Well, if we have backlog, try to process it now yet. */
 
 		if (copied >= target && !sk->sk_backlog.tail)
-			break;
+			break;/*如果复制的值大于等于所需要复制的，并且sk_backlog为空,
+			则跳出循环。这是因为我们每次复制完毕之后，都需要将sk_backlog中的数据复制到receive队列中。  */
 
 		if (copied) {
 			if (sk->sk_err ||
@@ -105,7 +106,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			    !timeo ||
 			    signal_pending(current))
 				break;
-		} else {
+		} else {/*没有拷贝到数据，判断错误情况*/
 			if (sock_flag(sk, SOCK_DONE))
 				break;
 
@@ -287,7 +288,7 @@ skip_copy:
 		if (!(flags & MSG_PEEK))
 			sk_eat_skb(sk, skb);
 		break;
-	} while (len > 0);
+	} while (len > 0);/*len 代表还没有拷贝完的数据长度*/
 
 	if (user_recv) {
 		if (!skb_queue_empty(&tp->ucopy.prequeue)) {
