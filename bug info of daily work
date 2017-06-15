@@ -1,0 +1,2 @@
+1.当需要修改交换机支持打包的时候，一般都可以设置interface的jumbo-frame enable ，有的三层交换机不支持，命令需要
+改为直接修改interface的mtu。
