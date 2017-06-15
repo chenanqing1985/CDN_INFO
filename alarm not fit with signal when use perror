@@ -1,0 +1,1 @@
+如果使用alarm函数和signal函数，使用了perror函数的话，可能会出故障，alarm和signal不是一个好的搭配。
