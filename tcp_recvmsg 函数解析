@@ -18,16 +18,17 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	    (sk->sk_state == TCP_ESTABLISHED))
 		sk_busy_loop(sk, nonblock);
 
-	lock_sock(sk);/*二话不说，先上锁*/
+	lock_sock(sk);/*二话不说，先上锁，这把锁基本就把tcp_v4_rcv对锁的判断给设置了，这样tcp_v4_rcv一般
+	处理流程就是往backlog中塞数据，大多数情况下如此*/
 
 	err = -ENOTCONN;
-	if (sk->sk_state == TCP_LISTEN)
+	if (sk->sk_state == TCP_LISTEN)/*listen状态，为啥要out呢?tcp_v4_do_rcv中处理listen态*/
 		goto out;
 
-	timeo = sock_rcvtimeo(sk, nonblock);
+	timeo = sock_rcvtimeo(sk, nonblock);/*非阻塞socket为0，否则为sk->sk_rcvtimeo*/
 
 	/* Urgent data needs to be handled specially. */
-	if (flags & MSG_OOB)
+	if (flags & MSG_OOB)/*紧急数据处理流程，一般很少用，在一些实时性要求比较高的场景中*/
 		goto recv_urg;
 
 	if (unlikely(tp->repair)) {
@@ -51,9 +52,9 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		seq = &peek_seq;
 	}
 
-	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len);
+	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len);/*可以参照nginx中的水线设置*/
 
-	do {
+	do {/*大循环，收包，拷贝*/
 		u32 offset;
 
 		/* Are we at urgent data? Stop if we have read anything or have SIGURG pending. */
@@ -81,7 +82,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				break;
 
 			offset = *seq - TCP_SKB_CB(skb)->seq;
-			if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)
+			if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)/*跳过syn*/
 				offset--;
 			if (offset < skb->len)
 				goto found_ok_skb;
@@ -190,7 +191,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			release_sock(sk);
 			lock_sock(sk);
 		} else {
-			sk_wait_data(sk, &timeo, last);
+			sk_wait_data(sk, &timeo, last);/*继续等待数据，除非已经超时wait for data to arrive at sk_receive_queue*/
 		}
 
 		if (user_recv) {
