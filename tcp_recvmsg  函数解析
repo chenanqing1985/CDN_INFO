@@ -1,6 +1,6 @@
 首先，我们针对其中的一段很长的内核注释进行解读：
 需要明白的是，四个队列的关系，以及处理的顺序。考虑到中断上下文和进程上下文占用时间的要求，拆分成四个队列处理
-是为了防止中断上下文占用时间过长。
+是为了防止中断上下文占用时间过长。只有后一个队列处理为空之前，前面的队列才能处理。
 /* Ugly... If prequeue is not empty, we have to
 			 * process it before releasing socket, otherwise
 			 * order will be broken at second iteration.
