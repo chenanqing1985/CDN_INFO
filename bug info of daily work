@@ -8,3 +8,6 @@ net.ipv4.netfilter.ip_conntrack_max 改大。
 net.ipv4.netfilter.ip_conntrack_tcp_timeout_established 改小。
 考虑到RR不需要conntrack，我是直接卸载模块解决。
 
+ 查看目前 ip_conntrack buffer 的使用状况
+grep conntrack /proc/slabinfo
+
