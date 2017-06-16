@@ -1,0 +1,74 @@
+最近遇到了一个bug，偶尔出来一次，就是rr建联失败，把排查过程需要用到的知识记录下来。
+现象是有时候会出现SYN-RECEIVED，按道理这个状态是一个瞬间状态，同一个连接看见一次算你运气好，看见多次，说明
+你需要看代码了。
+我首先确定下，ss -t打印的State字段，到底是指什么。rpm -qf `which ss`确定rpm包，下载源码。
+tcp4_seq_show 是用来读取/proc/net/tcp 和 /proc/net/tcp6文件的，ss 通过PF_FILE的socket与内核通信，获取
+当前的socket状态。
+RFC793中关于SYN_RECV状态的描述如下：
+SYN-RECEIVED - represents waiting for a confirming connection
+request acknowledgment after having both received and sent a
+connection request.
+也就是说，syn_recv的状态，是关于连接socket的，不是关于监听socket的，最初的监听socket的状态是listen状态，
+那么连接socket是什么时候建立，SYN-RECEIVED状态又是如何来设置以及迁移的呢？
+tcp_v4_do_rcv函数中，
+if (sk->sk_state == TCP_LISTEN) {
+	struct sock *nsk = tcp_v4_hnd_req(sk, skb);/*会调用tcp_check_req，然后回调tcp_v4_syn_recv_sock*/
+		if (!nsk)
+			goto discard;
+
+		if (nsk != sk) {
+			sock_rps_save_rxhash(nsk, skb);
+			if (tcp_child_process(sk, nsk, skb)) {
+				rsk = nsk;
+				goto reset;
+			}
+			return 0;
+		}
+	} else
+		sock_rps_save_rxhash(sk, skb);
+    
+    函数调用链：tcp_v4_rcv-->tcp_v4_do_rcv-->tcp_v4_hnd_req-->tcp_check_req-->
+tcp_v4_syn_recv_sock-->tcp_create_openreq_child
+    我们展开tcp_v4_hnd_req看看它做了什么。
+    static struct sock *tcp_v4_hnd_req(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcphdr *th = tcp_hdr(skb);
+	const struct iphdr *iph = ip_hdr(skb);
+	struct sock *nsk;
+	struct request_sock **prev;
+	/* Find possible connection requests. */
+	struct request_sock *req = inet_csk_search_req(sk, &prev, th->source,
+						       iph->saddr, iph->daddr);
+	if (req)/*如果这个ip，port对应的hash已经存在于syn_table中，返回该req，否则返回NULL*/
+		return tcp_check_req(sk, skb, req, prev, false);/*req不为NULL，进入tcp_check_req流程*/
+
+	nsk = inet_lookup_established(sock_net(sk), &tcp_hashinfo, iph->saddr,
+			th->source, iph->daddr, th->dest, inet_iif(skb));
+
+	if (nsk) {
+		if (nsk->sk_state != TCP_TIME_WAIT) {
+			bh_lock_sock(nsk);
+			return nsk;/**/
+		}
+		inet_twsk_put(inet_twsk(nsk));
+		return NULL;
+	}
+
+#ifdef CONFIG_SYN_COOKIES
+	if (!th->syn)
+		sk = cookie_v4_check(sk, skb, &(IPCB(skb)->opt));
+#endif
+	return sk;
+}
+
+继续查看tcp_check_req函数，由于该函数很长，我们略过检查的部分，进入syn的recv流程函数
+inet_csk(sk)->icsk_af_ops->syn_recv_sock是一个回调，
+const struct inet_connection_sock_af_ops ipv4_specific = {
+	.queue_xmit	   = ip_queue_xmit,
+	.send_check	   = tcp_v4_send_check,
+	.rebuild_header	   = inet_sk_rebuild_header,
+	.sk_rx_dst_set	   = inet_sk_rx_dst_set,
+	.conn_request	   = tcp_v4_conn_request,
+	.syn_recv_sock	   = tcp_v4_syn_recv_sock,/*其实就是调用的这个函数*/
+  
+  
