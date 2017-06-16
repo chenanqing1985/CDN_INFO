@@ -1,0 +1,4 @@
+状态不是ESTABLISHED或TIME_WAIT时，用tcp_rcv_state_process()处理,
+It's called from both tcp_v4_rcv and tcp_v6_rcv and should be address independent.
+在非TFO(google 提的一个tcp特性，tcp快速打开，即在tcp syn的阶段就开始携带数据，本文不讨论这个特性)的情况下，
+tcp_v4_syn_recv_sock 处理三次握手之后的连接建立。
