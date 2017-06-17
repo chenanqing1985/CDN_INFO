@@ -6,7 +6,7 @@ iproute工具集。
 
 下载源码。
 源码显示，ss快的秘诀在于，它利用到了TCP协议栈中tcp_diag。
-tcp_diag是一个用于分析统计的模块，可以获得Linux 内核中socket信息，是以为俄罗斯人写的。
+tcp_diag是一个用于分析统计的模块，可以获得Linux 内核中socket信息，是一位俄罗斯人写的。
 ss比netstat快，net-tools 就是要用来被iproute2淘汰的。
 用途	net-tool（被淘汰）	iproute2
 地址和链路配置	ifconfig	ip addr, ip link
@@ -16,7 +16,7 @@ VLAN	vconfig	             ip link
 隧道	iptunnel	    ip tunnel
 组播	ipmaddr	            ip maddr
 统计	netstat	            ss
-
+以上是背景-------------------------
 linux内核中使用tcp4_seq_show 来读取/proc/net/tcp 和 /proc/net/tcp6文件的，ss 通过PF_FILE的socket与内核通信，获取
 当前的socket状态。
 RFC793中关于SYN_RECV状态的描述如下：
@@ -85,5 +85,16 @@ const struct inet_connection_sock_af_ops ipv4_specific = {
 	.sk_rx_dst_set	   = inet_sk_rx_dst_set,
 	.conn_request	   = tcp_v4_conn_request,
 	.syn_recv_sock	   = tcp_v4_syn_recv_sock,/*其实就是调用的这个函数*/
+	
+而tcp_v4_syn_recv_sock的入口检查中：
+	if (sk_acceptq_is_full(sk))
+		goto exit_overflow;
+static inline bool sk_acceptq_is_full(const struct sock *sk)
+{
+	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
+}
+而sk->sk_max_ack_backlog则是listen的时候，pn_socket_listen用户态带过来的参数。
+所以，当backlog满了，则会出现处于SYN-RECEIVED状态的情况，虽然rr的backlog设置已经很大，但由于cpu的冲高，
+导致accept并没有及时去获取。
   
   
