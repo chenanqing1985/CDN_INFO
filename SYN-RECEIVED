@@ -46,7 +46,7 @@ if (sk->sk_state == TCP_LISTEN) {
     
     再往下，由于syn是发给listensocket的，就走
     tcp_rcv_state_process->tcp_conn_request->tcp_v4_send_synack，回复syn的ack给客户端。
-                                           ->inet_reqsk_alloc,分配request socket
+                                           ->inet_reqsk_alloc,分配request socket，注意不是conn socket
                                            ->queue_hash_add ,添加该请求到半连接队列。将req加入syn_table
     客户端收到服务器回复的syn的ack之后，会完成第三次握手，发送ack，然后客户端的socket进入establish状态。注意，
     此时服务器端的连接sock虽然已经创建，但是它不处理ack，还是listen socket来处理这个ack。
@@ -99,6 +99,11 @@ const struct inet_connection_sock_af_ops ipv4_specific = {
 而tcp_v4_syn_recv_sock的入口检查中：
 	if (sk_acceptq_is_full(sk))
 		goto exit_overflow;
+
+	newsk = tcp_create_openreq_child(sk, req, skb);/*根据req socket，创建conn socket*/
+	if (!newsk)
+		goto exit_nonewsk;
+
 static inline bool sk_acceptq_is_full(const struct sock *sk)
 {
 	return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
@@ -115,3 +120,6 @@ static inline bool sk_acceptq_is_full(const struct sock *sk)
   tcp_rcv_state_process函数中，为针对TCP_SYN_RECV的connsock的状态，在下次收到客户端的第三次握手的ack之后，
   会调用tcp_ack检查该ack是否正常，如果正常，则将connsock的状态，由TCP_SYN_RECV迁移到
   tcp_set_state(sk, TCP_ESTABLISHED);
+  
+  还有一点需要注意，tcp_v4_syn_recv_sock在处理的时候，会根据req的socket，再次创建一个conn socket，而
+  这个conn socket才是后面用来跟客户端发送除三次握手之外的tcp报文的socket。
