@@ -46,8 +46,9 @@ if (sk->sk_state == TCP_LISTEN) {
     
     再往下，由于syn是发给listensocket的，就走
     tcp_rcv_state_process->tcp_conn_request->tcp_v4_send_synack，回复syn的ack给客户端。
+                                           ->queue_hash_add ,添加该请求到半连接队列。
     客户端收到服务器回复的syn的ack之后，会完成第三次握手，发送ack，然后客户端的socket进入establish状态。注意，
-    此时服务器端的连接socket还没有创建，还是listen socket来处理这个ack。
+    此时服务器端的连接sock虽然已经创建，但是它不处理ack，还是listen socket来处理这个ack。
     服务器收到这个ack之后，走如下的调用链：
     
     函数调用链：tcp_v4_rcv-->tcp_v4_do_rcv-->tcp_v4_hnd_req-->tcp_check_req-->
