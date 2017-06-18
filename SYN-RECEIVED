@@ -89,8 +89,10 @@ tcp_v4_syn_recv_sock-->tcp_create_openreq_child
 	return sk;
 }
 
-继续查看tcp_check_req函数，由于该函数很长，我们略过检查的部分，进入syn的recv流程函数
-inet_csk(sk)->icsk_af_ops->syn_recv_sock是一个回调，
+继续查看tcp_check_req函数，由于该函数很长，检查的部分，比如PAWS
+(Protection Against Wrapped Sequence)检查,重传检查，主要是检查seq，进入syn的recv流程函数
+inet_csk(sk)->icsk_af_ops->syn_recv_sock是一个回调，负责发送syn的ack。这里比较奇怪的是，在
+tcp_conn_request中已经判断了accept 是否full，但是在syn_recv_sock也进行了一样的判断。
 const struct inet_connection_sock_af_ops ipv4_specific = {
 	.queue_xmit	   = ip_queue_xmit,
 	.send_check	   = tcp_v4_send_check,
