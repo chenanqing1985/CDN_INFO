@@ -97,4 +97,10 @@ static inline bool sk_acceptq_is_full(const struct sock *sk)
 所以，当backlog满了，则会出现处于SYN-RECEIVED状态的情况，虽然rr的backlog设置已经很大，但由于cpu的冲高，
 导致accept并没有及时去获取。
   
-  
+  有一个地方需要注意：inet_csk_clone_lock函数给conn的socket设置状态为TCP_SYN_RECV，如果是
+  sk_acceptq_is_full返回了，那么tcp_v4_syn_recv_sock按道理走不到
+  tcp_create_openreq_child->inet_csk_clone_lock中来，也就不会设置状态为TCP_SYN_RECV，这就与我们能看到
+  这个状态不符合，这个事因为ss和netstat看到的状态，和内核中sock的状态不是一一对应的。
+  tcp_rcv_state_process函数中，为针对TCP_SYN_RECV的connsock的状态，在下次收到客户端的第三次握手的ack之后，
+  会调用tcp_ack检查该ack是否正常，如果正常，则将connsock的状态，由TCP_SYN_RECV迁移到
+  tcp_set_state(sk, TCP_ESTABLISHED);
