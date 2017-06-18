@@ -45,9 +45,12 @@ if (sk->sk_state == TCP_LISTEN) {
 		sock_rps_save_rxhash(sk, skb);
     
     再往下，由于syn是发给listensocket的，就走
-    tcp_rcv_state_process->tcp_conn_request->tcp_v4_send_synack，回复syn的ack给客户端。
-                                           ->inet_reqsk_alloc,分配request socket，注意不是conn socket
+    tcp_rcv_state_process->tcp_conn_request->inet_reqsk_alloc，分配request socket，注意不是conn socket
+                                           ->tcp_openreq_init,tcp_v4_init_req,初始化 request socket
+                                           ->tcp_v4_send_synack,回复syn的ack给客户端。
                                            ->queue_hash_add ,添加该请求到半连接队列。将req加入syn_table
+					   
+    其实就是处理tcp_request_sock_ops对应的一些函数指针回调。
     客户端收到服务器回复的syn的ack之后，会完成第三次握手，发送ack，然后客户端的socket进入establish状态。注意，
     此时服务器端的连接sock虽然已经创建，但是它不处理ack，还是listen socket来处理这个ack。
     服务器收到这个ack之后，走如下的调用链：
@@ -123,3 +126,76 @@ static inline bool sk_acceptq_is_full(const struct sock *sk)
   
   还有一点需要注意，tcp_v4_syn_recv_sock在处理的时候，会根据req的socket，再次创建一个conn socket，而
   这个conn socket才是后面用来跟客户端发送除三次握手之外的tcp报文的socket。
+
+
+这里面有两个队列的检查：request_sock队列和accept队列。
+request_sock队列：
+
+static inline int inet_csk_reqsk_queue_is_full(const struct sock *sk)
+{
+    return reqsk_queue_is_full(&inet_csk(sk)->icsk_accept_queue);
+}
+static inline int reqsk_queue_is_full(const struct request_sock_queue *queue)
+{
+    return queue->listen_opt->qlen >> queue->listen_opt->max_qlen_log;
+}
+accept队列：
+
+static inline int sk_acceptq_is_full(struct sock *sk)
+{
+    return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
+}
+其中关系到4个变量，其中两个是sock的成员变量，两个是request_sock_queue中listen_opt的变量。
+
+max_qlen_log的初始化：
+在reqsk_queue_alloc中：
+
+    for (lopt->max_qlen_log = 6; /*64*/
+         (1 << lopt->max_qlen_log) < sysctl_max_syn_backlog;
+         lopt->max_qlen_log++);
+sk_max_ack_backlog的初始化：
+在inet_listen中：
+        sk->sk_max_ack_backlog = backlog;
+注：sk_max_ack_backlog就是我们经常熟悉的listen的参数。
+
+qlen的增加：
+tcp_v4_conn_request
+inet_csk_reqsk_queue_hash_add
+inet_csk_reqsk_queue_added
+reqsk_queue_added
+
+注：跟踪SYN数据包的处理，在tcp_v4_conn_request中，最后调用了inet_csk_reqsk_queue_hash_add函数：
+
+    inet_csk_reqsk_queue_added(sk, timeout);
+inet_csk_reqsk_queue_added增加连接请求队列的计数，必要时候设置计数器。
+reqsk_queue_added：
+    lopt->qlen++;
+
+qlen的减少：
+tcp_v4_hnd_req
+tcp_check_req
+inet_csk_reqsk_queue_removed
+reqsk_queue_removed
+
+注：
+在inet_csk_listen_stop中：
+
+    /* Following specs, it would be better either to send FIN
+     * (and enter FIN-WAIT-1, it is normal close)
+     * or to send active reset (abort).
+     * Certainly, it is pretty dangerous while synflood, but it is
+     * bad justification for our negligence 8)
+     * To be honest, we are not able to make either
+     * of the variants now.            --ANK
+     */
+    reqsk_queue_destroy(&icsk->icsk_accept_queue);
+sk_ack_backlog的增加：
+tcp_check_req
+inet_csk_reqsk_queue_add
+reqsk_queue_add
+sk_acceptq_added
+
+sk_ack_backlog的减少：
+inet_csk_accept
+reqsk_queue_get_child
+sk_acceptq_removed
