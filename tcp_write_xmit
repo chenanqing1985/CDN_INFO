@@ -126,3 +126,21 @@ repair:
 }
 拥塞窗口的值保存在tp->snd_cwnd中，一个很常见的问题是：我如何获知目前我的tcp状态属于拥塞控制的哪个状态，
 且不管算法如何，知道状态至少可以知道一些常见的问题现象。
+拥塞控制的状态分为5种：
+enum tcp_ca_state {
+	TCP_CA_Open = 0,
+#define TCPF_CA_Open	(1<<TCP_CA_Open)
+	TCP_CA_Disorder = 1,
+#define TCPF_CA_Disorder (1<<TCP_CA_Disorder)
+	TCP_CA_CWR = 2,
+#define TCPF_CA_CWR	(1<<TCP_CA_CWR)
+	TCP_CA_Recovery = 3,
+#define TCPF_CA_Recovery (1<<TCP_CA_Recovery)
+	TCP_CA_Loss = 4
+#define TCPF_CA_Loss	(1<<TCP_CA_Loss)
+};
+Open：是初始状态，也是正常状态
+Disorder：当第一次由于SACK块或重复确认而检测到拥塞时进入此状态；此状态下拥塞窗口不变，TCP需要保持网络中的包的数量不变；TCP在进入Recovery状态之前要进入本状态
+CRW（Congestion Window Reduced）：此状态下TCP会减小拥塞窗口，但不会重传已发送数据；这个状态在本地拥塞或收到显示拥塞通告（ECN）后设置
+Recovery：减小拥塞窗口直至到达ssthresh但不能增加拥塞窗口，会重传数据
+Loss：所有已发送数据都会被标记为丢失，拥塞窗口减小到一个报文段，然后数据发送端使用慢启动算法增大拥塞窗口。这个状态下不能使用快速重传算法
