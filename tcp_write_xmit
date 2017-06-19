@@ -124,4 +124,5 @@ repair:
 	}
 	return (push_one == 2) || (!tp->packets_out && tcp_send_head(sk));
 }
-拥塞窗口的值保存在tp->snd_cwnd中，
+拥塞窗口的值保存在tp->snd_cwnd中，一个很常见的问题是：我如何获知目前我的tcp状态属于拥塞控制的哪个状态，
+且不管算法如何，知道状态至少可以知道一些常见的问题现象。
