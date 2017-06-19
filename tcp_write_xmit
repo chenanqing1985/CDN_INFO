@@ -1,1 +1,127 @@
 tcp发送数据时的检测，包含拥塞控制，mtu探测，
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *skb;
+	unsigned int tso_segs, sent_pkts;
+	int cwnd_quota;
+	int result;
+	bool is_cwnd_limited = false;
+	u32 max_segs;
+
+	sent_pkts = 0;
+
+	if (!push_one) {
+		/* Do MTU probing. */
+		result = tcp_mtu_probe(sk);
+		if (!result) {
+			return false;
+		} else if (result > 0) {
+			sent_pkts = 1;
+		}
+	}
+
+	max_segs = tcp_tso_autosize(sk, mss_now);
+	while ((skb = tcp_send_head(sk))) {
+		unsigned int limit;
+
+		tso_segs = tcp_init_tso_segs(sk, skb, mss_now);
+		BUG_ON(!tso_segs);
+
+		if (unlikely(tp->repair) && tp->repair_queue == TCP_SEND_QUEUE) {
+			/* "skb_mstamp" is used as a start point for the retransmit timer */
+			skb_mstamp_get(&skb->skb_mstamp);
+			goto repair; /* Skip network transmission */
+		}
+
+		cwnd_quota = tcp_cwnd_test(tp, skb);/*拥塞控制，有一些拥塞控制的论文会将这个点提前*/
+		if (!cwnd_quota) {
+			is_cwnd_limited = true;
+			if (push_one == 2)
+				/* Force out a loss probe pkt. */
+				cwnd_quota = 1;
+			else
+				break;
+		}
+
+		if (unlikely(!tcp_snd_wnd_test(tp, skb, mss_now)))
+			break;
+
+		if (tso_segs == 1) {
+			if (unlikely(!tcp_nagle_test(tp, skb, mss_now,
+						     (tcp_skb_is_last(sk, skb) ?
+						      nonagle : TCP_NAGLE_PUSH))))
+				break;
+		} else {
+			if (!push_one &&
+			    tcp_tso_should_defer(sk, skb, &is_cwnd_limited,
+						 max_segs))
+				break;
+		}
+
+		limit = mss_now;
+		if (tso_segs > 1 && !tcp_urg_mode(tp))
+			limit = tcp_mss_split_point(sk, skb, mss_now,
+						    min_t(unsigned int,
+							  cwnd_quota,
+							  max_segs),
+						    nonagle);
+
+		if (skb->len > limit &&
+		    unlikely(tso_fragment(sk, skb, limit, mss_now, gfp)))
+			break;
+
+		/* TCP Small Queues :
+		 * Control number of packets in qdisc/devices to two packets / or ~1 ms.
+		 * This allows for :
+		 *  - better RTT estimation and ACK scheduling
+		 *  - faster recovery
+		 *  - high rates
+		 * Alas, some drivers / subsystems require a fair amount
+		 * of queued bytes to ensure line rate.
+		 * One example is wifi aggregation (802.11 AMPDU)
+		 */
+		limit = max(2 * skb->truesize, sk->sk_pacing_rate >> 10);
+		limit = min_t(u32, limit, sysctl_tcp_limit_output_bytes);
+
+		if (atomic_read(&sk->sk_wmem_alloc) > limit) {
+			set_bit(TSQ_THROTTLED, &tp->tsq_flags);
+			/* It is possible TX completion already happened
+			 * before we set TSQ_THROTTLED, so we must
+			 * test again the condition.
+			 * We abuse smp_mb__after_clear_bit() because
+			 * there is no smp_mb__after_set_bit() yet
+			 */
+			smp_mb__after_clear_bit();
+			if (atomic_read(&sk->sk_wmem_alloc) > limit)
+				break;
+		}
+
+		if (unlikely(tcp_transmit_skb(sk, skb, 1, gfp)))
+			break;
+
+repair:
+		/* Advance the send_head.  This one is sent out.
+		 * This call will increment packets_out.
+		 */
+		tcp_event_new_data_sent(sk, skb);
+
+		tcp_minshall_update(tp, mss_now, skb);
+		sent_pkts += tcp_skb_pcount(skb);
+
+		if (push_one)
+			break;
+	}
+
+	if (likely(sent_pkts)) {
+		if (tcp_in_cwnd_reduction(sk))
+			tp->prr_out += sent_pkts;
+
+		/* Send one loss probe per tail loss episode. */
+		if (push_one != 2)
+			tcp_schedule_loss_probe(sk);
+		tcp_cwnd_validate(sk, is_cwnd_limited);
+		return false;
+	}
+	return (push_one == 2) || (!tp->packets_out && tcp_send_head(sk));
+}
+拥塞窗口的值保存在tp->snd_cwnd中，
