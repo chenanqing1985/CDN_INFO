@@ -1,0 +1,27 @@
+tcp_send_ack，这个函数有一个很让人感动的地方，就是当skb分配失败的时候，采用delay_ack的方式。
+延迟多长时间呢：
+#define TCP_DELACK_MAX	((unsigned)(HZ/5))	/* maximal time to delay before sending an ACK */
+#define TCP_RTO_MAX	((unsigned)(120*HZ)) 
+
+void tcp_send_ack(struct sock *sk)
+{
+	struct sk_buff *buff;
+
+	/* If we have been reset, we may not send again. */
+	if (sk->sk_state == TCP_CLOSE)
+		return;
+
+	tcp_ca_event(sk, CA_EVENT_NON_DELAYED_ACK);
+
+	/* We are not putting this on the write queue, so
+	 * tcp_transmit_skb() will set the ownership to this
+	 * sock.
+	 */
+	buff = alloc_skb(MAX_TCP_HEADER, sk_gfp_atomic(sk, GFP_ATOMIC));/*分配内存失败，等一等，看待会是否有内存*/
+	if (buff == NULL) {
+		inet_csk_schedule_ack(sk);
+		inet_csk(sk)->icsk_ack.ato = TCP_ATO_MIN;
+		inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
+					  TCP_DELACK_MAX, TCP_RTO_MAX);
+		return;
+	}
