@@ -2,7 +2,7 @@ tcp_send_ack，这个函数有一个很让人感动的地方，就是当skb分�
 延迟多长时间呢：
 #define TCP_DELACK_MAX	((unsigned)(HZ/5))	/* maximal time to delay before sending an ACK */
 #define TCP_RTO_MAX	((unsigned)(120*HZ)) 
-
+由于是硬编码，所以最大的情况下是120S，但是我们一般看到抓包显示的是200ms。
 void tcp_send_ack(struct sock *sk)
 {
 	struct sk_buff *buff;
@@ -25,3 +25,6 @@ void tcp_send_ack(struct sock *sk)
 					  TCP_DELACK_MAX, TCP_RTO_MAX);
 		return;
 	}
+
+分配内存失败之后，按道理这么短的时间，应该失败的概率也很大，但linux还是做了一次尝试，一方面由于单独一个ack
+确实比较划不来，延迟的目的最大的原因还是跟本端发送的数据一起发送，所谓带数据的ack就是如此。
