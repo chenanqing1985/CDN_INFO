@@ -285,6 +285,7 @@ void elv_bio_merged(struct request_queue *q, struct request *rq,
     struct elevator_queue *e = q->elevator;
 
     if (e->type->ops.elevator_bio_merged_fn)
-        e->type->ops.elevator_bio_merged_fn(q, rq, bio);　//调用调度算法的处理函数，这个只是针对cfq的算法提供
+        e->type->ops.elevator_bio_merged_fn(q, rq, bio);　//调用调度算法的处理函数，
+	cfq_bio_merged ，这个只是针对cfq的算法提供，其他调度器为NULL。
 }
 
