@@ -274,3 +274,8 @@ int elv_merge(struct request_queue *q, struct request **req, struct bio *bio)
 
 	return ELEVATOR_NO_MERGE;
 }
+IO的合并，分为两个级别，一个是bio级别，一个是request级别。
+bio能否合并，主要看磁盘是否一样，比如两个不同的磁盘肯定不能合并，方向是否一样，比如读写肯定是不能合并等等，
+还有一个是request的合并，比如对于cfq的调度模型，本来排在第一个的快要超时的io，这个时候新来的请求跟这个io
+从bio的角度看能够合并，但是会改变这次bio的排序，则依然不会合并，这种请求级别的合并是由elevator_allow_merge_fn
+这个回调指针来实现的，对于cfq，则为cfq_allow_merge，其他调度算法为空。
