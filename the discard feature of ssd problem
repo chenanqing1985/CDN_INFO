@@ -8,3 +8,8 @@ root:/home/zxdfs/mstu/dfs_log # grep A01269D8 /proc/mounts
 /dev/sdbo /mnt/A01269D8 xfs rw,relatime,attr2,delaylog,nobarrier,noquota 0 0
 
 /dev/sdbo是一块sata的ssd，未完待解。
+
+判断sdbo是否支持discard特性：
+root:~ # cat /sys/block/sdbo/queue/discard_max_bytes 
+134217216
+如果大于0，则是满足的。不要使用hdparm -I 去简单判断。
