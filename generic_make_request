@@ -279,3 +279,12 @@ bio能否合并，主要看磁盘是否一样，比如两个不同的磁盘肯�
 还有一个是request的合并，比如对于cfq的调度模型，本来排在第一个的快要超时的io，这个时候新来的请求跟这个io
 从bio的角度看能够合并，但是会改变这次bio的排序，则依然不会合并，这种请求级别的合并是由elevator_allow_merge_fn
 这个回调指针来实现的，对于cfq，则为cfq_allow_merge，其他调度算法为空。
+void elv_bio_merged(struct request_queue *q, struct request *rq,
+            struct bio *bio)
+{
+    struct elevator_queue *e = q->elevator;
+
+    if (e->type->ops.elevator_bio_merged_fn)
+        e->type->ops.elevator_bio_merged_fn(q, rq, bio);　//调用调度算法的处理函数，这个只是针对cfq的算法提供
+}
+
