@@ -1,0 +1,10 @@
+ssd有个比较好的特性，即fitrim，xfs对这个的支持可以参见：
+http://xfs.org/index.php/FITRIM/discard
+不过我测试发现，当使用remount方式去调用这个特性的时候，发现没有生效，
+root:/home/zxdfs/mstu/dfs_log # grep A01269D8 /proc/mounts 
+/dev/sdbo /mnt/A01269D8 xfs rw,relatime,attr2,delaylog,nobarrier,noquota 0 0
+root:/home/zxdfs/mstu/dfs_log # mount -o remount,discard /mnt/A01269D8
+root:/home/zxdfs/mstu/dfs_log # grep A01269D8 /proc/mounts 
+/dev/sdbo /mnt/A01269D8 xfs rw,relatime,attr2,delaylog,nobarrier,noquota 0 0
+
+/dev/sdbo是一块sata的ssd，未完待解。
