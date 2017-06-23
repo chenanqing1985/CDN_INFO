@@ -1,0 +1,16 @@
+文章转自：http://www.linuxvox.com/2009/11/what-is-the-linux-kernel-parameter-tcp_low_latency/
+
+What is the linux kernel parameter tcp_low_latency?
+The textbook definition from the linux kernel documentation is that if /proc/sys/net/ipv4/tcp_low_latency is set to 1, the TCP stack makes decisions that prefer lower latency as opposed to higher throughput. By default, this option is not set meaning that higher throughput is preferred. An example of an application where this default should be changed would be a Beowulf compute cluster.
+
+What this setting really does is turn off tcp prequeue processing.  TCP has three queues, the receive queue, the backlog queue, and the prequeue.  So turning on tcp_low_latency will cause packets to bypass the prequeue queue and go right to the receive queue.  You can confirm this by checking netstat -s before and after setting tcp_low_latency.  If it’s set to 0, you should see the number of “packets directly received from prequeue” and “packets directly queued to recvmsg prequeue” in netstat -s increasing.  When it’s set to 1, you won’t see these numbers move.
+
+This kernel parameter is set by many low latency application developers and their sys admins looking for that magic pill that will put them ahead of the competition.  But does it really lower latency?  It would be impossible to say whether it would for your particular application but I felt like I needed to try some benchmark experimentation.
+
+I setup two servers, 1 running SLES10 (2.6.16.x enterprise kernel) and the other running openSUSE 11.2 (2.6.32-rc7-0.1-default kernel compiled from Linus’ git repo). I ran the lat_tcp benchmark from the lmbench benchmark suite between the two hosts for a number of different packet sizes (1, 4, 16, 64, 128, 256, 512, 1024, 1500 bytes)  and with different combinations of the tcp_low_latency kernel parameter.  All other kernel parameters were kept at the default.   Multiple runs were conducted for each packet size and averaged.   Based on the testing, latency was lowest when both servers had tcp_low_latency=1.  Unfortunately, it wasn’t much lower and it’s hard to see the latency improvements in the graph.  Based on my calculations though, latency decreases between .12-.49 % when both servers had tcp_low_latency=1 compared to when both servers had tcp_low_latency=0.  Latency decreased the most in the 512 byte test from 236.4570 usecs to 235.4979 usecs.
+
+tcp_low_latency benchmark results[/caption]
+
+I can’t tell you what to set tcp_low_latency to.  Unfortunately my results didn’t produce a slam dunk.  If anything, it may dismiss the notion that any one kernel parameter can produce drastic improvement when it comes to network latency.
+
+My recommendation would be to perform specific application benchmark tests to determine if this kernel parameter lowers latency in your environment.
