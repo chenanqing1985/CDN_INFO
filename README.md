@@ -1,2 +1,2 @@
 # CDN_INFO
-t
+it is not a code project,just some work experience of mine
