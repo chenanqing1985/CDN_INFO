@@ -1,0 +1,107 @@
+创建了两个文件，main.c main.h,使用以下git，避免忘记（备注：这个要谢谢文洋兄，我之前不愿意使用git，觉得svn足够了）
+
+git init之后，
+[root@storage RpmTest]# git stautus
+git: 'stautus' is not a git command. See 'git --help'.
+
+Did you mean this?
+	status
+	
+强大的git居然能识别我敲错了 stautus ，并且问我是不是 status ,太有爱了。
+
+git add .
+
+当前默认的基线是master，我没有从仓库clone代码，只是自己设置玩玩。
+
+git commit -m "caq first commit"
+
+git log如下：
+commit 96fbee5c70a3a67da3e97bcc8c8f410654551f26
+Author: root <root@storage.(none)>
+Date:   Mon Jul 10 10:50:30 2017 +0800
+
+    caq first commit
+    
+ 发现user和email地址都不对，于是使用：
+ git config --global user.name "caq"
+ git config --global user.email chenanqing@163.com.cn
+  git log看，发现没什么卵用。
+  
+  然后继续使用：
+   git commit --amend --author='caq <chenanqing@163.com.cn>'
+   才修改过来。
+   
+   生成patch：
+   git diff 96fbee5c7 8ebaf73f2 >caq_pach_v1
+   
+   生成一个分支：
+   git branch new_branch
+   查看分支：
+   git branch
+   切换分支：
+   git checkout new_branch
+   删除分支：当然你得先创建后删除。
+   git branch -D test_branch
+   
+   对比分支：
+   git diff master caq_new_branch
+   
+   应用分支：
+   git apply caq_new_branch
+   
+   [root@storage RpmTest]# git branch new_branch
+[root@storage RpmTest]# git branch
+* master
+  new_branch
+[root@storage RpmTest]# git checkout new_branch
+Switched to branch 'new_branch'
+[root@storage RpmTest]# git branch
+  master
+* new_branch
+[root@storage RpmTest]# git checkout -b test_branch
+Switched to a new branch 'test_branch'
+[root@storage RpmTest]# git branch
+  master
+  new_branch
+* test_branch
+[root@storage RpmTest]# git branch -D test_branch
+error: Cannot delete the branch 'test_branch' which you are currently on.
+[root@storage RpmTest]# git branch new_branch
+fatal: A branch named 'new_branch' already exists.
+You have mail in /var/spool/mail/root
+[root@storage RpmTest]# git branch
+  master
+  new_branch
+* test_branch
+[root@storage RpmTest]# git branch --help
+You have mail in /var/spool/mail/root
+[root@storage RpmTest]# 
+[root@storage RpmTest]# 
+[root@storage RpmTest]# 
+[root@storage RpmTest]# 
+[root@storage RpmTest]# 
+[root@storage RpmTest]# 
+[root@storage RpmTest]# git new_branch
+git: 'new_branch' is not a git command. See 'git --help'.
+You have mail in /var/spool/mail/root
+[root@storage RpmTest]# git checkout new_branch
+Switched to branch 'new_branch'
+[root@storage RpmTest]# git branch
+  master
+* new_branch
+  test_branch
+You have mail in /var/spool/mail/root
+[root@storage RpmTest]# git branch -D test_branch
+Deleted branch test_branch (was 8ebaf73).
+[root@storage RpmTest]# git branch
+  master
+* new_branch
+[root@storage RpmTest]# git branch -m test_branch ccaq_new_branch
+error: refname refs/heads/test_branch not found
+fatal: Branch rename failed
+[root@storage RpmTest]# git branch -m new_branch caq_new_branch
+You have mail in /var/spool/mail/root
+[root@storage RpmTest]# git branch
+* caq_new_branch
+  master
+
