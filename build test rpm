@@ -1,6 +1,11 @@
 [root@centos7 rpm_make]# pwd
 /home/caq/code/rpm_make
 
+cd /home/caq/code/rpm_make
+mkdir -p ./{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+这个是手工创建模式。
+
 为了防止将debug信息合入到rpm包，可在当前目录生成一个.rpmmacros文件，将debug_package声明为空
 [root@centos7 rpm_make]# vi .rpmmacros 
 %debug_package %{nil}
@@ -9,7 +14,7 @@
 [root@centos7 rpm_make]# ls
 BUILD  BUILDROOT  RPMS  SOURCES  SPECS  SRPMS
 
-
+SPECS目录下创建spec文件如下：
 
 cat rpm_test.spec 文件
 spec文件如下：
@@ -18,7 +23,7 @@ spec文件如下：
 %define Version 1
 %define    __spec_install_post /usr/lib/rpm/brp-compress
 %define    __os_install_post /usr/lib/rpm/brp-compress
-##caq 去除debuginfo信息，不生成software-debuginfo-1.0.2-3.rpm之类的包
+##caq 去除debuginfo信息，不生成software-debuginfo-1.0.2-3.rpm之类的包，这里需要注意的是，如果要注释掉带百分号的宏，除了要加一个#，还要加一个%
 %define debug_package %{nil}
 %define __strip /bin/true
 %define rpms  %{_topdir}/RPMS
