@@ -1,8 +1,14 @@
 [root@centos7 rpm_make]# pwd
 /home/caq/code/rpm_make
 
+为了防止将debug信息合入到rpm包，可在当前目录生成一个.rpmmacros文件，将debug_package声明为空
+[root@centos7 rpm_make]# vi .rpmmacros 
+%debug_package %{nil}
+
+
 [root@centos7 rpm_make]# ls
 BUILD  BUILDROOT  RPMS  SOURCES  SPECS  SRPMS
+
 
 
 cat rpm_test.spec 文件
