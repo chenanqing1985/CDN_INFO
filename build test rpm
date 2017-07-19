@@ -1,4 +1,6 @@
 ###我是以root用户来创建的，建议不要root用户创建，否则rm删东西的时候万一没弄好，歇逼了。
+###保证环境上已经安装redhat-rpm-config，rpmbuild，gcc，make等工具
+
 [root@centos7 rpm_make]# pwd
 /home/caq/code/rpm_make
 
