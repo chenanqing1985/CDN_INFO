@@ -1,0 +1,55 @@
+两个环境，同网段，能ping通，ip分别为 10.47.242.97 和 10.47.242.98
+从98 ping 97是ok的。
+[root@storage ~]# ping 10.47.242.97
+PING 10.47.242.97 (10.47.242.97) 56(84) bytes of data.
+64 bytes from 10.47.242.97: icmp_seq=1 ttl=64 time=0.241 ms
+64 bytes from 10.47.242.97: icmp_seq=2 ttl=64 time=0.228 ms
+
+97上看arp条目也是正常的。
+lwb:/home/caq/testcode # arp
+Address                  HWtype  HWaddress           Flags Mask            Iface
+10.47.242.98             ether   98:f5:37:e3:6b:0a   C                     eth2
+10.47.242.1              ether   00:19:c6:03:d9:fd   C                     eth2
+
+ping也是正常的。
+(gdb) shell ping 10.47.242.98
+PING 10.47.242.98 (10.47.242.98) 56(84) bytes of data.
+64 bytes from 10.47.242.98: icmp_seq=1 ttl=64 time=0.351 ms
+64 bytes from 10.47.242.98: icmp_seq=2 ttl=64 time=0.376 ms
+64 bytes from 10.47.242.98: icmp_seq=3 ttl=64 time=0.363 ms
+64 bytes from 10.47.242.98: icmp_seq=4 ttl=64 time=0.351 ms
+
+但是发现从98 connect 97 的一个端口时，报错为：
+connect(3, {sa_family=AF_INET, sin_port=htons(3333), sin_addr=inet_addr("10.47.242.98")}, 16) = -1 EHOSTUNREACH (No route to host)
+
+该错误码为113，按道理都能够ping 通，怎么会报这个错，抓包。
+
+很明显，97去连98的端口3333，但是98回复了unreachable - admin prohibited
+11:18:27.259656 IP 10.47.242.97.56036 > 10.47.242.98.3333: Flags [S], seq 1706856783, win 14600, options [mss 1460,sackOK,TS val 794403292 ecr 0,nop,wscale 7], length 0
+11:18:27.259736 IP 10.47.242.98 > 10.47.242.97: ICMP host 10.47.242.98 unreachable - admin prohibited, length 68
+
+然后尝试从97 ssh 到98 ，居然也是正常的，ssh 和 我的connect的区别只有端口，看来是端口有区别对待。
+
+查看iptables，发现有一条如下：
+[root@storage ~]# iptables -t filter -L
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     udp  --  anywhere             anywhere            udp dpt:domain 
+ACCEPT     tcp  --  anywhere             anywhere            tcp dpt:domain 
+ACCEPT     udp  --  anywhere             anywhere            udp dpt:bootps 
+ACCEPT     tcp  --  anywhere             anywhere            tcp dpt:bootps 
+ACCEPT     all  --  anywhere             anywhere            state RELATED,ESTABLISHED 
+ACCEPT     icmp --  anywhere             anywhere            
+ACCEPT     all  --  anywhere             anywhere            
+ACCEPT     tcp  --  anywhere             anywhere            state NEW tcp dpt:ssh 
+REJECT     all  --  anywhere             anywhere            reject-with icmp-host-prohibited 
+
+果然是被reject的，且回复的reject就是icmp-host-prohibited
+
+由于前面有一条accept icmp的条目，所以ping也不受影响。
+
+通过iptables -t filter -L INPUT --line-numbers查看rulenum，删除后正常。
+
+那么问题来了，是谁突然加的这么一条iptables呢？ 
+
+
