@@ -1,0 +1,158 @@
+最近处理一个问题，发现有的网口up不起来。
+
+ethtool eth6
+Settings for eth6:
+	Supported ports: [ FIBRE ]
+	Supported link modes:   10000baseT/Full 
+	Supports auto-negotiation: No
+	Advertised link modes:  10000baseT/Full 
+	Advertised pause frame use: No
+	Advertised auto-negotiation: No
+	Speed: 10000Mb/s
+	Duplex: Full
+	Port: FIBRE
+	PHYAD: 0
+	Transceiver: external
+	Auto-negotiation: off
+	Supports Wake-on: g
+	Wake-on: g
+	Current message level: 0x0000000f (15)
+			       drv probe link timer
+	Link detected: no
+  
+ifconfig eth6 up 没有反应。
+
+strace这个过程，打印如下：
+ioctl(4, SIOCGIFFLAGS, {ifr_name="eth6", ifr_flags=IFF_UP|IFF_BROADCAST|IFF_SLAVE|IFF_MULTICAST}) = 0
+ioctl(4, SIOCSIFFLAGS, 0x7ffc98d26c90)  = 0
+exit_group(0)                           = ?
+
+内核代码流程是：
+	case SIOCSIFFLAGS:	/* Set interface flags */
+		return dev_change_flags(dev, ifr->ifr_flags);
+  返回0按道理是正常的，为什么起不来。
+  
+  于是干脆再down一遍，奇迹出现了，down完之后再up，再进行strace，发现有如下打印：
+  
+  ioctl(4, SIOCSIFFLAGS, 0x7fff37670450)  = -1 ENOMEM (Cannot allocate memory)
+dup(2)                                  = 6
+fcntl(6, F_GETFL)                       = 0x8002 (flags O_RDWR|O_LARGEFILE)
+fstat(6, {st_mode=S_IFCHR|0620, st_rdev=makedev(136, 28), ...}) = 0
+mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f9972e0e000
+lseek(6, 0, SEEK_CUR)                   = -1 ESPIPE (Illegal seek)
+write(6, "SIOCSIFFLAGS: Cannot allocate me"..., 37SIOCSIFFLAGS: Cannot allocate memory
+) = 37
+close(6)                                = 0
+munmap(0x7f9972e0e000, 4096)            = 0
+exit_group(-1)                          = ?
+
+分配不到内存，于是查看dmesg，有新的发现：
+
+调用堆栈如下：
+
+JAedge6:~ # dmesg
+[9162409.155614] ifconfig: page allocation failure: order:5, mode:0x80d0
+[9162409.155619] Pid: 781, comm: ifconfig Tainted: G           ENX 3.0.101-0.47.52-default #1
+[9162409.155620] Call Trace:
+[9162409.155634]  [<ffffffff81004b95>] dump_trace+0x75/0x300
+[9162409.155641]  [<ffffffff81461d43>] dump_stack+0x69/0x6f
+[9162409.155648]  [<ffffffff811024e6>] warn_alloc_failed+0xc6/0x170
+[9162409.155652]  [<ffffffff811040f1>] __alloc_pages_slowpath+0x561/0x7f0--------进入了slowpath，
+[9162409.155655]  [<ffffffff81104569>] __alloc_pages_nodemask+0x1e9/0x200
+[9162409.155660]  [<ffffffff81007746>] dma_generic_alloc_coherent+0xa6/0x160
+[9162409.155666]  [<ffffffff81030f18>] x86_swiotlb_alloc_coherent+0x28/0x80
+[9162409.155684]  [<ffffffffa05a5aa1>] i40e_setup_tx_descriptors+0xf1/0x140 [i40e]
+[9162409.155713]  [<ffffffffa05869cd>] i40e_vsi_setup_tx_resources+0x2d/0x60 [i40e]
+[9162409.155722]  [<ffffffffa058b347>] i40e_vsi_open+0x27/0x1c0 [i40e]
+[9162409.155731]  [<ffffffffa058b53b>] i40e_open+0x5b/0x90 [i40e]
+[9162409.155741]  [<ffffffff813a5da7>] __dev_open+0xa7/0x110
+[9162409.155745]  [<ffffffff813a48fb>] __dev_change_flags+0x9b/0x180--------------熟悉的函数
+[9162409.155749]  [<ffffffff813a5cb0>] dev_change_flags+0x20/0x70
+[9162409.155753]  [<ffffffff8140a955>] devinet_ioctl+0x5b5/0x620
+[9162409.155758]  [<ffffffff8138f509>] sock_do_ioctl+0x29/0x60
+[9162409.155761]  [<ffffffff8138f86b>] sock_ioctl+0x7b/0x280
+[9162409.155765]  [<ffffffff8116ec3b>] do_vfs_ioctl+0x8b/0x3b0
+[9162409.155768]  [<ffffffff8116f001>] sys_ioctl+0xa1/0xb0
+[9162409.155772]  [<ffffffff8146cda7>] tracesys+0xd9/0xde
+[9162409.155787]  [<00007fb7de2a6ce7>] 0x7fb7de2a6ce6
+
+根据分配模式mode:0x80d0，可以知道宏值为：
+#define ___GFP_HIGH		0x20u
+#define ___GFP_IO		0x40u
+#define ___GFP_FS		0x80u
+#define ___GFP_ZERO		0x8000u
+
+要分配的内存大小为32*4k=128k
+既然进入了slowpath，那么说明没有合适的块。
+
+[9162409.162691] Node 0 DMA free:15904kB min:120kB low:148kB high:180kB active_anon:0kB inactive_anon:0kB active_file:0kB inactive_file:0kB unevictable:0kB isolated(anon):0kB isolated(file):0kB present:15680kB mlocked:0kB dirty:0kB writeback:0kB mapped:0kB shmem:0kB slab_reclaimable:0kB slab_unreclaimable:0kB kernel_stack:0kB pagetables:0kB unstable:0kB bounce:0kB writeback_tmp:0kB pages_scanned:0 all_unreclaimable? yes
+[9162409.162696] lowmem_reserve[]: 0 1599 128859 128859
+[9162409.162698] Node 0 DMA32 free:521760kB min:12684kB low:15852kB high:19024kB active_anon:1372kB inactive_anon:17864kB active_file:396kB inactive_file:800932kB unevictable:6464kB isolated(anon):0kB isolated(file):0kB present:1637408kB mlocked:6464kB dirty:0kB writeback:0kB mapped:324kB shmem:17892kB slab_reclaimable:9804kB slab_unreclaimable:117188kB kernel_stack:16kB pagetables:204kB unstable:0kB bounce:0kB writeback_tmp:0kB pages_scanned:0 all_unreclaimable? no
+[9162409.162704] lowmem_reserve[]: 0 0 127260 127260
+[9162409.162706] Node 0 Normal free:1516580kB min:1009708kB low:1262132kB high:1514560kB active_anon:8746684kB inactive_anon:2298136kB active_file:1093096kB inactive_file:96852196kB unevictable:15591060kB isolated(anon):0kB isolated(file):0kB present:130314240kB mlocked:15591096kB dirty:608kB writeback:0kB mapped:128548kB shmem:2307616kB slab_reclaimable:367732kB slab_unreclaimable:2127656kB kernel_stack:31920kB pagetables:223776kB unstable:0kB bounce:0kB writeback_tmp:0kB pages_scanned:0 all_unreclaimable? no
+[9162409.162712] lowmem_reserve[]: 0 0 0 0
+[9162409.162714] Node 1 Normal free:1621196kB min:1025480kB low:1281848kB high:1538220kB active_anon:11279020kB inactive_anon:1941384kB active_file:1080860kB inactive_file:88023016kB unevictable:24280980kB isolated(anon):0kB isolated(file):0kB present:132349388kB mlocked:24280984kB dirty:812kB writeback:0kB mapped:5795476kB shmem:7620708kB slab_reclaimable:358276kB slab_unreclaimable:1995312kB kernel_stack:24040kB pagetables:271884kB unstable:0kB bounce:0kB writeback_tmp:0kB pages_scanned:0 all_unreclaimable? no
+
+[9162449.769662] ifconfig: page allocation failure: order:6, mode:0xd0-------------也有这种模式的
+[9162449.769669] Pid: 17429, comm: ifconfig Tainted: G           ENX 3.0.101-0.47.52-default #1
+[9162449.769672] Call Trace:
+[9162449.769689]  [<ffffffff81004b95>] dump_trace+0x75/0x300
+[9162449.769700]  [<ffffffff81461d43>] dump_stack+0x69/0x6f
+[9162449.769712]  [<ffffffff811024e6>] warn_alloc_failed+0xc6/0x170
+[9162449.769721]  [<ffffffff811040f1>] __alloc_pages_slowpath+0x561/0x7f0
+[9162449.769731]  [<ffffffff81104569>] __alloc_pages_nodemask+0x1e9/0x200
+[9162449.769740]  [<ffffffff81145b73>] kmem_getpages+0x53/0x180
+[9162449.769746]  [<ffffffff81146976>] fallback_alloc+0x196/0x270
+[9162449.769753]  [<ffffffff8114701c>] __kmalloc+0x28c/0x330
+[9162449.769786]  [<ffffffffa05a59ec>] i40e_setup_tx_descriptors+0x3c/0x140 [i40e]
+[9162449.769856]  [<ffffffffa05869cd>] i40e_vsi_setup_tx_resources+0x2d/0x60 [i40e]
+[9162449.769876]  [<ffffffffa058b347>] i40e_vsi_open+0x27/0x1c0 [i40e]
+[9162449.769907]  [<ffffffffa058b53b>] i40e_open+0x5b/0x90 [i40e]
+[9162449.769930]  [<ffffffff813a5da7>] __dev_open+0xa7/0x110
+[9162449.769939]  [<ffffffff813a48fb>] __dev_change_flags+0x9b/0x180
+[9162449.769949]  [<ffffffff813a5cb0>] dev_change_flags+0x20/0x70
+[9162449.769957]  [<ffffffff8140a955>] devinet_ioctl+0x5b5/0x620
+[9162449.769964]  [<ffffffff8138f509>] sock_do_ioctl+0x29/0x60
+[9162449.769970]  [<ffffffff8138f86b>] sock_ioctl+0x7b/0x280
+[9162449.770006]  [<ffffffff8116ec3b>] do_vfs_ioctl+0x8b/0x3b0
+[9162449.770012]  [<ffffffff8116f001>] sys_ioctl+0xa1/0xb0
+[9162449.770019]  [<ffffffff8146cda7>] tracesys+0xd9/0xde
+[9162449.770050]  [<00007fdde024ace7>] 0x7fdde024ace6
+
+在合并之前，
+JAedge6:~ # cat /proc/buddyinfo 
+Node 0, zone      DMA      0      0      0      1      2      1      1      0      1      1      3 
+Node 0, zone    DMA32    419    643    403    451    313    225    235    251    148     48      3 
+Node 0, zone   Normal  20962  68138  35642   2430    161      2      0      0      0      0      1 
+Node 1, zone   Normal  68686 157150    906      8      0      0      0      0      0      0      1 
+明明还有最大的一块内存可以拆分，为啥没拆？
+
+ok，手动合并块。
+echo 1 > /proc/sys/vm/drop_caches
+JAedge6:~ # cat /proc/buddyinfo 
+Node 0, zone      DMA      0      0      0      1      2      1      1      0      1      1      3 
+Node 0, zone    DMA32   8557   8460   7429   5915   3586   1499    380    260    148     48      3 
+Node 0, zone   Normal 2834074 2826437 1777328 672633 109003   4046     16      0      0      0      1 
+Node 1, zone   Normal 2943155 2702189 1645931 586739  83425   2255      2      0      0      0      1 
+
+echo 2 > /proc/sys/vm/drop_caches 
+echo 3 > /proc/sys/vm/drop_caches 
+
+JAedge6:~ # cat /proc/buddyinfo 
+Node 0, zone      DMA      0      0      0      1      2      1      1      0      1      1      3 
+Node 0, zone    DMA32   6201   5597   4910   4359   3225   1898    624    332    153     48      3 
+Node 0, zone   Normal 1453979 2550503 1714926 796684 187727  13800    151      0      0      0      1 
+Node 1, zone   Normal 1619014 2484161 1619823 701543 144586   7165      7      0      0      0      1 
+对比合并之后：发现再往大块的合并并没有明显增加，但是至少256的块是有了。
+
+再次操作先网口down，再up，都起来了。
+
+但是为什么要先down再up，这个一直没搞清楚，看strace的话，怀疑是__dev_close的时候会释放一些内存，然后立刻up的话，这些内存能给我用。
+
+
+
+
+
+
+
+
