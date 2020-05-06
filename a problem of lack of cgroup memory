@@ -1,0 +1,96 @@
+在linux内核中，有一些路径，由于申请内存不能失败，则会进行循环，
+而这些循环操作，将会导致这个进程可能一直处于内核态而不响应信号，因为没有检查signal pending的流程。
+
+在最近处理的几个问题案例中，都属于这种情况，比如docker ps会阻塞，kill不掉，runc疯狂占cpu等，都属于这种情况的
+
+故障现象：
+top - 14:02:56 up 250 days, 18:33, 7 users, load average: 142.92, 142.85, 142.80
+Tasks: 731 total, 1 running, 660 sleeping, 0 stopped, 70 zombie
+%Cpu(s): 0.2 us, 4.6 sy, 0.0 ni, 7.2 id, 87.8 wa, 0.0 hi, 0.3 si, 0.0 st
+KiB Mem : 98496200 total, 14529116 free, 22914272 used, 61052812 buff/cache
+KiB Swap: 0 total, 0 free, 0 used. 55247796 avail Mem
+
+PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND
+407487 root 20 0 0 0 0 S 5.6 0.0 17:50.98 kworker/u81:12
+99193 root 20 0 3253588 57688 9400 S 5.3 0.1 166:18.75 spider-agent
+261323 root 20 0 0 0 0 S 5.3 0.0 13:34.79 kworker/u81:2
+347197 root 20 0 0 0 0 S 5.3 0.0 3:19.92 kworker/u81:17
+509610 root 20 0 0 0 0 S 5.3 0.0 0:43.81 kworker/u81:4
+191853 root 20 0 0 0 0 S 5.0 0.0 0:54.08 kworker/u81:9
+234072 root 20 0 0 0 0 S 5.0 0.0 0:34.99 kworker/u81:6
+471654 root 20 0 0 0 0 S 5.0 0.0 10:47.46 kworker/u81:18
+300850 root 0 -20 0 0 0 S 4.3 0.0 0:17.58 kworker/2:1H
+7255 root 20 0 0 0 0 S 4.0 0.0 1:49.39 kworker/u81:16
+118244 root 20 0 0 0 0 S 4.0 0.0 0:23.76 kworker/u81:0
+136104 root 0 -20 0 0 0 S 4.0 0.0 14:45.31 kworker/10:2H
+136932 root 0 -20 0 0 0 S 4.0 0.0 31:03.85 kworker/19:2H
+
+通过debugfs trace相应的worker,/sys/kernel/debug/tracing/events/workqueue目录下enable 对应的trace开关
+
+cat /sys/kernel/debug/tracing/trace >/home/caq/caq_trace.txt
+
+<...>-291745 [032] .... 21345503.523189: rpc_task_run_action: task:56962@5 flags=4801 state=0005 status=96 action=call_decode [sunrpc]
+<...>-291745 [032] .... 21345503.523190: rpc_task_run_action: task:56962@5 flags=4801 state=0005 status=-10023 action=rpc_exit_task [sunrpc]
+<...>-291745 [032] ..s. 21345503.523191: rpc_task_wakeup: task:56982@5 flags=4001 state=0006 status=0 timeout=0 queue=ForeChannel Slot table
+<...>-291745 [032] ..s. 21345503.523192: rpc_task_sleep: task:56962@5 flags=4801 state=0005 status=-10023 timeout=0 queue=NFS client
+<...>-291745 [032] .... 21345503.523194: rpc_task_run_action: task:56982@5 flags=4001 state=0005 status=0 action=rpc_prepare_task [sunrpc]
+<...>-291745 [032] .... 21345503.523195: rpc_task_run_action: task:56982@5 flags=4001 state=0005 status=0 action=call_start [sunrpc]
+<...>-291745 [032] .... 21345503.523195: rpc_task_run_action: task:56982@5 flags=4001 state=0005 status=0 action=call_reserve [sunrpc]
+<...>-291745 [032] ..s. 21345503.523195: rpc_task_sleep: task:56982@5 flags=4001 state=0005 status=-11 timeout=0 queue=xprt_sending
+<...>-291745 [032] .... 21345503.523322: rpc_task_run_action: task:56932@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523322: rpc_task_run_action: task:56932@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523322: rpc_task_run_action: task:56932@5 flags=4801 state=0005 status=96 action=call_decode [sunrpc]
+<...>-291745 [032] .... 21345503.523323: rpc_task_run_action: task:56932@5 flags=4801 state=0005 status=-10023 action=rpc_exit_task [sunrpc]
+<...>-291745 [032] ..s. 21345503.523325: rpc_task_sleep: task:56932@5 flags=4801 state=0005 status=-10023 timeout=0 queue=NFS client
+<...>-291745 [032] .... 21345503.523358: rpc_task_run_action: task:56948@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523358: rpc_task_run_action: task:56948@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523358: rpc_task_run_action: task:56948@5 flags=4801 state=0005 status=96 action=call_decode [sunrpc]
+<...>-291745 [032] .... 21345503.523359: rpc_task_run_action: task:56948@5 flags=4801 state=0005 status=-10023 action=rpc_exit_task [sunrpc]
+<...>-291745 [032] ..s. 21345503.523361: rpc_task_sleep: task:56948@5 flags=4801 state=0005 status=-10023 timeout=0 queue=NFS client
+<...>-291745 [032] .... 21345503.523363: rpc_task_run_action: task:56965@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523363: rpc_task_run_action: task:56965@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523363: rpc_task_run_action: task:56965@5 flags=4801 state=0005 status=96 action=call_decode [sunrpc]
+<...>-291745 [032] .... 21345503.523364: rpc_task_run_action: task:56965@5 flags=4801 state=0005 status=-10023 action=rpc_exit_task [sunrpc]
+<...>-291745 [032] ..s. 21345503.523365: rpc_task_sleep: task:56965@5 flags=4801 state=0005 status=-10023 timeout=0 queue=NFS client
+<...>-291745 [032] .... 21345503.523595: rpc_task_run_action: task:57001@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523595: rpc_task_run_action: task:57001@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+<...>-291745 [032] .... 21345503.523595: rpc_task_run_action: task:57001@5 flags=4801 state=0005 status=96 action=call_decode [sunrpc]
+<...>-291745 [032] .... 21345503.523596: rpc_task_run_action: task:57001@5 flags=4801 state=0005 status=-10023 action=rpc_exit_task [sunrpc]
+<...>-291745 [032] ..s. 21345503.523597: rpc_task_sleep: task:57001@5 flags=4801 state=0005 status=-10023 timeout=0 queue=NFS client
+<...>-291745 [032] .... 21345503.523601: rpc_task_run_action: task:56958@5 flags=4801 state=0005 status=0 action=call_status [sunrpc]
+
+查看对应的task，确定对应的进程。
+
+然后开始找规律，找到某一类进程
+获取他们的堆栈：
+foreach start.sh bt -f >4_27_bt_full_start.sh.txt
+
+获取对应的page：grep wait_on_page_bit 4_27_bt_full_start.sh.txt -A 1 |grep : |awk '{print "0x"$2}' |sort -u >page.txt
+
+由于对应的容器是需要关闭的，所以先给他们的信号挂一下，
+ps -ef |grep -i defu |grep -v grep |awk '{print $3}' |xargs kill -9
+
+然后清除对应的writeback标志，设置上error标志
+SetPageError(page);
+end_page_writeback(page);
+
+这里面存在类似锁的竞态等东西，需要仔细抠代码，切不可乱搞。
+唤醒之后，这些僵尸进程和一直等待nfs返回的进程全部干掉了，系统恢复了它往常的宁静。
+top - 12:21:10 up 251 days, 16:51, 6 users, load average: 5.21, 5.17, 7.87
+Tasks: 406 total, 2 running, 404 sleeping, 0 stopped, 0 zombie
+%Cpu(s): 2.4 us, 0.4 sy, 0.0 ni, 97.2 id, 0.0 wa, 0.0 hi, 0.0 si, 0.0 st
+KiB Mem : 98496200 total, 35805640 free, 2128976 used, 60561584 buff/cache
+KiB Swap: 0 total, 0 free, 0 used. 76195712 avail Mem
+
+PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND
+474797 root 20 0 186296 13584 5308 R 47.1 0.0 0:00.08 rpm
+122223 openvsw+ 10 -10 3086632 362504 12192 S 5.9 0.4 6000:29 ovs-vswitchd
+474796 root 20 0 162304 2544 1552 R 5.9 0.0 0:00.01 top
+1 root 20 0 203116 16108 2644 S 0.0 0.0 414:11.92 systemd
+2 root 20 0 0 0 0 S 0.0 0.0 557:02.77 kthreadd
+3 root 20 0 0 0 0 S 0.0 0.0 43:18.94 ksoftirqd/0
+8 root rt 0 0 0 0 S 0.0 0.0 39:56.12 migration/0
+9 root 20 0 0 0 0 S 0.0 0.0 0:00.00 rcu_bh
+10 root 20 0 0 0 0 S 0.0 0.0 1219:01 rcu_sched
+11 root 0 -20 0 0 0 S 0.0 0.0 0:00.00 lru-add-drain
+12 root rt 0 0 0 0 S 0.0 0.0 2:32.05 watchdog/0
